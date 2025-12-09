@@ -278,7 +278,7 @@ document.getElementById('splitButton').addEventListener('click', () => {
                     <style>
                         body {
                             font-family: Arial, sans-serif;
-                            padding: 20px;
+                            padding: 0px;
                         }
                         .share-section {
                             margin-bottom: 40px;
@@ -298,15 +298,15 @@ document.getElementById('splitButton').addEventListener('click', () => {
                             background: #f5f5f5;
                             border: 1px solid #ddd;
                         }
-                        /* Center and scale QR codes for print */
-                        .qr-code {
+                        /* Center and scale QR codes for print - using unique class */
+                        .print-qr-code {
                             display: flex;
                             align-items: center;
                             justify-content: center;
                             padding: 10px;
                         }
-                        .qr-code canvas,
-                        .qr-code img {
+                        .print-qr-code canvas,
+                        .print-qr-code img {
                             max-width: 100%;
                             width: 100%;
                             height: auto;
@@ -324,19 +324,7 @@ document.getElementById('splitButton').addEventListener('click', () => {
                     <script src="${window.location.origin}/qrcode.min.js"></script>
                 </head>
                 <body>
-                    <h1>Secret Shares</h1>
             `);
-
-            // Inject CSS into main document to center and scale QR on the page
-            const styleEl = document.createElement('style');
-            styleEl.id = 'qr-responsive-styles';
-            styleEl.textContent = `
-                .qr-container { display: flex; align-items: center; justify-content: center; }
-                .qr-container canvas, .qr-container img { max-width: 100%; width: 100%; height: auto; display: block; }
-            `;
-            if (!document.getElementById('qr-responsive-styles')) {
-                document.head.appendChild(styleEl);
-            }
             
             shares.forEach((share, index) => {
                 printWindow.document.write(`
@@ -344,7 +332,7 @@ document.getElementById('splitButton').addEventListener('click', () => {
                     <div class="share-title" style="padding-top:20px;">Share ${index + 1}:</div>
                     <p>Generated on ${new Date().toLocaleString()}</p>
                         <div class="share-text">${share}</div>
-                        <div class="qr-code" id="print-qr-${index}"></div>
+                        <div class="print-qr-code" id="print-qr-${index}"></div>
                     </div>
                 `);
             });
