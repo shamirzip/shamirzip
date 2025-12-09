@@ -1,4 +1,4 @@
-const CACHE_NAME = 'secret-sharing-v3';
+const CACHE_NAME = 'secret-sharing-v4';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -8,6 +8,8 @@ const urlsToCache = [
   '/lib/qrcode/qrcode.min.js',
   '/lib/pako/pako.js',
   '/lib/bech32/bech32-browser.js',
+  '/lib/qr-scanner/qr-scanner.umd.min.js',
+  '/lib/qr-scanner/qr-scanner-worker.min.js',
   '/lib/bootstrap/css/bootstrap.min.css',
   '/lib/bootstrap/js/bootstrap.bundle.min.js'
 ];

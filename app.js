@@ -312,7 +312,10 @@ document.getElementById('addShareButton').addEventListener('click', () => {
         <div class="d-flex align-items-start gap-2">
             <div class="flex-grow-1">
                 <label class="form-label">Share ${shareCount}:</label>
-                <input type="text" class="form-control share-input" placeholder="Paste share here...">
+                <div class="input-group">
+                    <button class="btn btn-outline-secondary scan-qr-btn" type="button" title="Scan QR Code">📸</button>
+                    <input type="text" class="form-control share-input" placeholder="Paste share here...">
+                </div>
             </div>
             <button class="btn btn-outline-danger remove-share-btn" type="button" style="margin-top: 32px;">Remove</button>
         </div>
@@ -327,6 +330,9 @@ document.getElementById('addShareButton').addEventListener('click', () => {
             updateShareLabels();
         }
     });
+    
+    // Attach scan listener to new button
+    attachScanListeners();
 });
 
 // Update share labels after removal
@@ -449,3 +455,78 @@ function escapeHtml(text) {
     };
     return text.replace(/[&<>"']/g, m => map[m]);
 }
+
+// QR Scanner functionality
+let qrScanner = null;
+let currentScanInput = null;
+
+function initQrScanner() {
+    const video = document.getElementById('qr-video');
+    const modal = document.getElementById('qr-scanner-modal');
+    const closeBtn = document.getElementById('qr-scanner-close');
+    
+    qrScanner = new QrScanner(
+        video,
+        result => {
+            // On successful scan
+            if (currentScanInput) {
+                currentScanInput.value = result.data;
+                stopScanner();
+            }
+        },
+        {
+            returnDetailedScanResult: true,
+            highlightScanRegion: true,
+            highlightCodeOutline: true,
+        }
+    );
+    
+    // Close button handler
+    closeBtn.addEventListener('click', stopScanner);
+    
+    // Close on background click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            stopScanner();
+        }
+    });
+}
+
+function startScanner(inputElement) {
+    currentScanInput = inputElement;
+    const modal = document.getElementById('qr-scanner-modal');
+    modal.classList.add('active');
+    
+    if (qrScanner) {
+        qrScanner.start().catch(err => {
+            alert('Failed to start camera: ' + err.message);
+            stopScanner();
+        });
+    }
+}
+
+function stopScanner() {
+    const modal = document.getElementById('qr-scanner-modal');
+    modal.classList.remove('active');
+    
+    if (qrScanner) {
+        qrScanner.stop();
+    }
+    
+    currentScanInput = null;
+}
+
+// Initialize QR scanner on page load
+initQrScanner();
+
+// Add scan button event listeners to existing inputs
+function attachScanListeners() {
+    document.querySelectorAll('.scan-qr-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const input = e.target.closest('.input-group').querySelector('.share-input');
+            startScanner(input);
+        });
+    });
+}
+
+attachScanListeners();

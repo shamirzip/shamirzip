@@ -162,6 +162,11 @@ QR code generation library.
 - **License**: MIT
 - **Usage**: Generate QR codes for shares
 
+### [qr-scanner](https://github.com/nimiq/qr-scanner)
+Lightweight QR code scanner for the browser.
+- **License**: MIT
+- **Usage**: Scan QR codes with device camera
+
 ## License
 
 MIT License - See LICENSE file for details
