@@ -1,17 +1,19 @@
-const CACHE_NAME = 'secret-sharing-v4';
+const CACHE_NAME = 'secret-sharing-v6';
 const urlsToCache = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/app.js',
-  '/lib/secrets/secrets.js',
-  '/lib/qrcode/qrcode.min.js',
-  '/lib/pako/pako.js',
-  '/lib/bech32/bech32-browser.js',
-  '/lib/qr-scanner/qr-scanner.umd.min.js',
-  '/lib/qr-scanner/qr-scanner-worker.min.js',
-  '/lib/bootstrap/css/bootstrap.min.css',
-  '/lib/bootstrap/js/bootstrap.bundle.min.js'
+  './',
+  './index.html',
+  './manifest.json',
+  './app.js',
+  './icon-192.png',
+  './icon-512.png',
+  './lib/secrets/secrets.js',
+  './lib/qrcode/qrcode.min.js',
+  './lib/pako/pako.js',
+  './lib/bech32/bech32-browser.js',
+  './lib/qr-scanner/qr-scanner.umd.min.js',
+  './lib/qr-scanner/qr-scanner-worker.min.js',
+  './lib/bootstrap/css/bootstrap.min.css',
+  './lib/bootstrap/js/bootstrap.bundle.min.js'
 ];
 
 // Install event - cache resources

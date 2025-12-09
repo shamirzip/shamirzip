@@ -2,7 +2,8 @@
   "name": "Secret Sharing PWA",
   "short_name": "SecretShare",
   "description": "Split and combine secrets using Shamir's Secret Sharing",
-  "start_url": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#0d6efd",
@@ -16,6 +17,12 @@
       "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
