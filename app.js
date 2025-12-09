@@ -1,0 +1,451 @@
+// Register service worker
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js')
+        .then(reg => console.log('Service Worker registered'))
+        .catch(err => console.log('Service Worker registration failed:', err));
+}
+
+// Initialize secrets.js
+secrets.init();
+
+// Helper functions for compression and encoding
+function uint8ArrayToHex(uint8array) {
+    return Array.from(uint8array)
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+}
+
+function hexToUint8Array(hexString) {
+    const bytes = new Uint8Array(hexString.length / 2);
+    for (let i = 0; i < hexString.length; i += 2) {
+        bytes[i / 2] = parseInt(hexString.substr(i, 2), 16);
+    }
+    return bytes;
+}
+
+function hexToBech32Words(hexString) {
+    const bytes = hexToUint8Array(hexString);
+    return bech32.toWords(bytes);
+}
+
+function bech32WordsToHex(words) {
+    const bytes = bech32.fromWords(words);
+    return uint8ArrayToHex(new Uint8Array(bytes));
+}
+
+// State
+let sharesNeeded = 2;
+let totalShares = 3;
+let shareCount = 2;
+
+// Elements
+const sharesNeededValue = document.getElementById('sharesNeededValue');
+const totalSharesValue = document.getElementById('totalSharesValue');
+const secretInput = document.getElementById('secretInput');
+const sharesOutput = document.getElementById('sharesOutput');
+const combineInputs = document.getElementById('combineInputs');
+const combineResult = document.getElementById('combineResult');
+
+// Split Tab - Counter controls
+document.getElementById('sharesNeededMinus').addEventListener('click', () => {
+    if (sharesNeeded > 2) {
+        sharesNeeded--;
+        if (sharesNeeded > totalShares) {
+            totalShares = sharesNeeded;
+            totalSharesValue.textContent = totalShares;
+        }
+        sharesNeededValue.textContent = sharesNeeded;
+    }
+});
+
+document.getElementById('sharesNeededPlus').addEventListener('click', () => {
+    sharesNeeded++;
+    if (sharesNeeded > totalShares) {
+        totalShares = sharesNeeded;
+        totalSharesValue.textContent = totalShares;
+    }
+    sharesNeededValue.textContent = sharesNeeded;
+});
+
+document.getElementById('totalSharesMinus').addEventListener('click', () => {
+    if (totalShares > sharesNeeded && totalShares > 2) {
+        totalShares--;
+        totalSharesValue.textContent = totalShares;
+    }
+});
+
+document.getElementById('totalSharesPlus').addEventListener('click', () => {
+    totalShares++;
+    totalSharesValue.textContent = totalShares;
+});
+
+// Split functionality
+document.getElementById('splitButton').addEventListener('click', () => {
+    const secret = secretInput.value.trim();
+    
+    if (!secret) {
+        sharesOutput.innerHTML = '<div class="alert alert-warning">Please enter a secret to split.</div>';
+        return;
+    }
+
+    try {
+        // 1. Compress the secret using pako
+        const encoder = new TextEncoder();
+        const secretBytes = encoder.encode(secret);
+        const compressed = pako.deflate(secretBytes, { level: 9 });
+        
+        // 2. Convert compressed data to hex
+        const compressedHex = uint8ArrayToHex(compressed);
+        
+        // 3. Generate Shamir shares (in hex)
+        const hexShares = secrets.share(compressedHex, totalShares, sharesNeeded);
+        
+        // 4. Encode shares with bech32 (with checksum)
+        const shares = hexShares.map((hexShare, index) => {
+            // Extract components from hex share
+            const shareObj = secrets.extractShareComponents(hexShare);
+            
+            // Convert only the data portion to bech32
+            const words = hexToBech32Words(shareObj.data);
+            
+            // Create simple prefix s1, s2, s3, etc.
+            const prefix = `s${index + 1}`;
+            
+            // Encode with bech32 (includes checksum)
+            const bech32Encoded = bech32.encode(prefix, words, 5000);
+            
+            // Store bits and id for reconstruction
+            const idLen = (Math.pow(2, shareObj.bits) - 1).toString(16).length;
+            const idHex = shareObj.id.toString(16).padStart(idLen, '0');
+            const metadata = shareObj.bits.toString(36).toUpperCase() + idHex;
+            
+            return metadata + bech32Encoded;
+        });
+        
+        // Display shares
+        let html = '<h5 class="mb-3">Generated Shares:</h5>';
+        shares.forEach((share, index) => {
+            html += `
+                <div class="share-item mb-3">
+                    <div class="input-group mb-2">
+                        <span class="input-group-text">Share ${index + 1}</span>
+                        <input type="text" class="form-control" value="${share}" readonly>
+                        <button class="btn btn-outline-secondary copy-share-btn" type="button" data-share="${share}">Copy</button>
+                        <button class="btn btn-outline-info qr-toggle" type="button" data-index="${index}">
+                            <span class="toggle-icon">+</span> (QR)
+                        </button>
+                    </div>
+                    <div class="qr-container" id="qr-${index}"></div>
+                </div>
+            `;
+        });
+        
+        html += '<button class="btn btn-success mt-2 me-2" id="copyAllShares">Copy All Shares</button>';
+        html += '<button class="btn btn-outline-secondary mt-2" id="printShares">Print Shares</button>';
+        sharesOutput.innerHTML = html;
+        
+        // Add QR toggle event listeners
+        document.querySelectorAll('.qr-toggle').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const index = e.currentTarget.getAttribute('data-index');
+                const qrContainer = document.getElementById(`qr-${index}`);
+                const toggleIcon = e.currentTarget.querySelector('.toggle-icon');
+                
+                if (qrContainer.classList.contains('active')) {
+                    // Hide QR code
+                    qrContainer.classList.remove('active');
+                    qrContainer.innerHTML = '';
+                    toggleIcon.textContent = '+';
+                } else {
+                    // Show QR code
+                    qrContainer.classList.add('active');
+                    qrContainer.innerHTML = `<div id="qrcode-${index}"></div>`;
+                    new QRCode(document.getElementById(`qrcode-${index}`), {
+                        text: shares[index],
+                        width: 256,
+                        height: 256,
+                        colorDark: "#000000",
+                        colorLight: "#ffffff",
+                        correctLevel: QRCode.CorrectLevel.M
+                    });
+                    toggleIcon.textContent = '-';
+                }
+            });
+        });
+        
+        // Add copy event listeners
+        document.querySelectorAll('.copy-share-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const share = e.target.getAttribute('data-share');
+                copyToClipboard(share);
+                e.target.textContent = 'Copied!';
+                setTimeout(() => { e.target.textContent = 'Copy'; }, 2000);
+            });
+        });
+        
+        document.getElementById('copyAllShares').addEventListener('click', () => {
+            const allShares = shares.join('\n');
+            copyToClipboard(allShares);
+            document.getElementById('copyAllShares').textContent = 'Copied!';
+            setTimeout(() => { document.getElementById('copyAllShares').textContent = 'Copy All Shares'; }, 2000);
+        });
+        
+        document.getElementById('printShares').addEventListener('click', () => {
+            // Create print window
+            const printWindow = window.open('', '', 'width=800,height=600');
+            printWindow.document.write(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Secret Shares</title>
+                    <style>
+                        body {
+                            font-family: Arial, sans-serif;
+                            padding: 20px;
+                        }
+                        .share-section {
+                            margin-bottom: 40px;
+                            page-break-inside: avoid;
+                        }
+                        .share-title {
+                            font-size: 18px;
+                            font-weight: bold;
+                            margin-bottom: 10px;
+                        }
+                        .share-text {
+                            font-family: monospace;
+                            font-size: 12px;
+                            word-break: break-all;
+                            margin-bottom: 15px;
+                            padding: 10px;
+                            background: #f5f5f5;
+                            border: 1px solid #ddd;
+                        }
+                        /* Center and scale QR codes for print */
+                        .qr-code {
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            padding: 10px;
+                        }
+                        .qr-code canvas,
+                        .qr-code img {
+                            max-width: 100%;
+                            width: 100%;
+                            height: auto;
+                            display: block;
+                        }
+                        @media print {
+                            .share-section {
+                                page-break-after: always;
+                            }
+                            .share-section:last-child {
+                                page-break-after: auto;
+                            }
+                        }
+                    </style>
+                    <script src="${window.location.origin}/qrcode.min.js"></script>
+                </head>
+                <body>
+                    <h1>Secret Shares</h1>
+            `);
+
+            // Inject CSS into main document to center and scale QR on the page
+            const styleEl = document.createElement('style');
+            styleEl.id = 'qr-responsive-styles';
+            styleEl.textContent = `
+                .qr-container { display: flex; align-items: center; justify-content: center; }
+                .qr-container canvas, .qr-container img { max-width: 100%; width: 100%; height: auto; display: block; }
+            `;
+            if (!document.getElementById('qr-responsive-styles')) {
+                document.head.appendChild(styleEl);
+            }
+            
+            shares.forEach((share, index) => {
+                printWindow.document.write(`
+                    <div class="share-section">
+                    <div class="share-title" style="padding-top:20px;">Share ${index + 1}:</div>
+                    <p>Generated on ${new Date().toLocaleString()}</p>
+                        <div class="share-text">${share}</div>
+                        <div class="qr-code" id="print-qr-${index}"></div>
+                    </div>
+                `);
+            });
+            
+            printWindow.document.write(`
+                </body>
+                </html>
+            `);
+            printWindow.document.close();
+            
+            // Wait for document to load, then generate QR codes and print
+            printWindow.onload = () => {
+                shares.forEach((share, index) => {
+                    new QRCode(printWindow.document.getElementById(`print-qr-${index}`), {
+                        text: share,
+                        width: 256,
+                        height: 256,
+                        colorDark: "#000000",
+                        colorLight: "#ffffff",
+                        correctLevel: QRCode.CorrectLevel.M
+                    });
+                });
+                
+                // Give QR codes time to render before printing
+                setTimeout(() => {
+                    printWindow.print();
+                }, 500);
+            };
+        });
+        
+    } catch (error) {
+        sharesOutput.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    }
+});
+
+// Combine Tab - Add share input
+document.getElementById('addShareButton').addEventListener('click', () => {
+    shareCount++;
+    const newInput = document.createElement('div');
+    newInput.className = 'mb-3 share-input-group';
+    newInput.innerHTML = `
+        <div class="d-flex align-items-start gap-2">
+            <div class="flex-grow-1">
+                <label class="form-label">Share ${shareCount}:</label>
+                <input type="text" class="form-control share-input" placeholder="Paste share here...">
+            </div>
+            <button class="btn btn-outline-danger remove-share-btn" type="button" style="margin-top: 32px;">Remove</button>
+        </div>
+    `;
+    combineInputs.appendChild(newInput);
+    
+    // Add remove event listener
+    newInput.querySelector('.remove-share-btn').addEventListener('click', () => {
+        const allGroups = document.querySelectorAll('.share-input-group');
+        if (allGroups.length > 2) {
+            newInput.remove();
+            updateShareLabels();
+        }
+    });
+});
+
+// Update share labels after removal
+function updateShareLabels() {
+    const allGroups = document.querySelectorAll('.share-input-group');
+    allGroups.forEach((group, index) => {
+        const label = group.querySelector('.form-label');
+        if (label) {
+            label.textContent = `Share ${index + 1}:`;
+        }
+    });
+    shareCount = allGroups.length;
+}
+
+// Combine functionality
+document.getElementById('combineButton').addEventListener('click', () => {
+    const shareInputs = document.querySelectorAll('.share-input');
+    const shares = [];
+    
+    shareInputs.forEach(input => {
+        const value = input.value.trim();
+        if (value) {
+            shares.push(value);
+        }
+    });
+    
+    if (shares.length < 2) {
+        combineResult.innerHTML = '<div class="result-box result-error">Please enter at least 2 shares.</div>';
+        return;
+    }
+    
+    try {
+        // 1. Decode bech32 shares and reconstruct hex format
+        const hexShares = shares.map((share, idx) => {
+            try {
+                // Find where bech32 part starts (after metadata, looks for 's' prefix)
+                const bech32Start = share.search(/s\d+1/);
+                if (bech32Start === -1) {
+                    throw new Error('Invalid share format');
+                }
+                
+                const metadata = share.substring(0, bech32Start);
+                const bech32Encoded = share.substring(bech32Start);
+                
+                // Extract bits and id from metadata
+                const bits = parseInt(metadata.charAt(0), 36);
+                const idLen = (Math.pow(2, bits) - 1).toString(16).length;
+                const idHex = metadata.substring(1, 1 + idLen);
+                
+                // Decode bech32 (validates checksum)
+                const decoded = bech32.decode(bech32Encoded, 5000);
+                
+                // Convert bech32 words back to hex
+                const hexData = bech32WordsToHex(decoded.words);
+                
+                // Reconstruct full hex share
+                return metadata.charAt(0) + idHex + hexData;
+            } catch (e) {
+                throw new Error(`Share ${idx + 1} decode failed: ${e.message}`);
+            }
+        });
+        
+        // 2. Combine Shamir shares
+        const compressedHex = secrets.combine(hexShares);
+        
+        // 3. Convert hex to Uint8Array
+        const compressedBytes = hexToUint8Array(compressedHex);
+        
+        // 4. Decompress using pako
+        const decompressed = pako.inflate(compressedBytes);
+        
+        // 5. Convert back to string
+        const decoder = new TextDecoder();
+        const recoveredSecret = decoder.decode(decompressed);
+        
+        combineResult.innerHTML = `
+            <div class="result-box result-success">
+                <h5>Secret reconstructed:</h5>
+                <p class="mb-3" style="word-break: break-word;">${escapeHtml(recoveredSecret)}</p>
+                <button class="btn btn-success" id="copySecretBtn">Copy Secret</button>
+            </div>
+        `;
+        
+        // Add copy secret button listener
+        document.getElementById('copySecretBtn').addEventListener('click', () => {
+            copyToClipboard(recoveredSecret);
+            document.getElementById('copySecretBtn').textContent = 'Copied!';
+            setTimeout(() => { document.getElementById('copySecretBtn').textContent = 'Copy Secret'; }, 2000);
+        });
+        
+    } catch (error) {
+        combineResult.innerHTML = `<div class="result-box result-error">Unable to combine: ${error.message || 'Invalid or insufficient shares.'}</div>`;
+    }
+});
+
+// Utility functions
+function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text);
+    } else {
+        // Fallback for older browsers
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+    }
+}
+
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+}

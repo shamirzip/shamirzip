@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0d6efd">
+    <title>Secret Sharing PWA</title>
+    <link rel="icon" type="image/x-icon" href="/icon.svg">
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="lib/bootstrap/css/bootstrap.min.css">
+    <style>
+        body {
+            background-color: #212529;
+            color: #f8f9fa;
+        }
+        .tab-content { margin-top: 2rem; }
+        .share-output { margin-top: 1rem; }
+        .share-item { margin-bottom: 0.5rem; }
+        .result-box { margin-top: 1.5rem; padding: 1rem; border-radius: 0.375rem; }
+        .result-success { background-color: #1a4731; border: 1px solid #2d6a4f; color: #95d5b2; }
+        .result-error { background-color: #4a1a1a; border: 1px solid #6a2828; color: #ff6b6b; }
+        .counter-group { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+        .counter-label { min-width: 120px; }
+        .counter-value { font-size: 1.5rem; font-weight: bold; min-width: 60px; text-align: center; }
+        .form-control, .form-control:focus {
+            background-color: #343a40;
+            border-color: #495057;
+            color: #f8f9fa;
+        }
+        .form-control::placeholder {
+            color: #6c757d;
+        }
+        .form-control:focus {
+            box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+        }
+        .input-group-text {
+            background-color: #343a40;
+            border-color: #495057;
+            color: #f8f9fa;
+        }
+        .alert-warning {
+            background-color: #664d03;
+            border-color: #997404;
+            color: #ffecb5;
+        }
+        .alert-danger {
+            background-color: #4a1a1a;
+            border-color: #6a2828;
+            color: #ff6b6b;
+        }
+        .qr-container {
+            margin-top: 0.5rem;
+            padding: 1rem;
+            background-color: #ffffff;
+            border-radius: 0.375rem;
+            display: none;
+            width: fit-content;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .qr-container.active {
+            display: block;
+        }
+        .qr-container canvas {
+            display: block;
+        }
+        .qr-toggle {
+            cursor: pointer;
+            user-select: none;
+        }
+    </style>
+</head>
+<body data-bs-theme="dark">
+    <div class="container py-4">
+        <h1 class="mb-4">Secret Sharing</h1>
+        
+        <!-- Tabs -->
+        <ul class="nav nav-tabs" id="mainTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="split-tab" data-bs-toggle="tab" data-bs-target="#split" type="button" role="tab">Split</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="combine-tab" data-bs-toggle="tab" data-bs-target="#combine" type="button" role="tab">Combine</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="about-tab" data-bs-toggle="tab" data-bs-target="#about" type="button" role="tab">About</button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="mainTabsContent">
+            <!-- Split Tab -->
+            <div class="tab-pane fade show active" id="split" role="tabpanel">
+                <div class="mb-3">
+                    <label for="secretInput" class="form-label">Secret Text:</label>
+                    <textarea class="form-control" id="secretInput" rows="4" placeholder="Enter your secret here..."></textarea>
+                </div>
+
+                <div class="counter-group">
+                    <span class="counter-label">Shares needed:</span>
+                    <button class="btn btn-outline-secondary" id="sharesNeededMinus" type="button">-</button>
+                    <span class="counter-value" id="sharesNeededValue">2</span>
+                    <button class="btn btn-outline-secondary" id="sharesNeededPlus" type="button">+</button>
+                </div>
+
+                <div class="counter-group">
+                    <span class="counter-label">Of total:</span>
+                    <button class="btn btn-outline-secondary" id="totalSharesMinus" type="button">-</button>
+                    <span class="counter-value" id="totalSharesValue">3</span>
+                    <button class="btn btn-outline-secondary" id="totalSharesPlus" type="button">+</button>
+                </div>
+
+                <button class="btn btn-primary mb-3" id="splitButton">Split</button>
+
+                <div id="sharesOutput" class="share-output"></div>
+            </div>
+
+            <!-- Combine Tab -->
+            <div class="tab-pane fade" id="combine" role="tabpanel">
+                <div id="combineInputs">
+                    <div class="mb-3 share-input-group">
+                        <label class="form-label">Share 1:</label>
+                        <input type="text" class="form-control share-input" placeholder="Paste share here...">
+                    </div>
+                    <div class="mb-3 share-input-group">
+                        <label class="form-label">Share 2:</label>
+                        <input type="text" class="form-control share-input" placeholder="Paste share here...">
+                    </div>
+                </div>
+
+                <button class="btn btn-outline-secondary mb-3" id="addShareButton">+ Add Share</button>
+
+                <div>
+                    <button class="btn btn-primary" id="combineButton">Combine</button>
+                </div>
+
+                <div id="combineResult"></div>
+            </div>
+
+            <!-- About Tab -->
+            <div class="tab-pane fade" id="about" role="tabpanel">
+                <h4 class="mb-3">What is Secret Sharing?</h4>
+                <p>This tool uses <strong>Shamir's Secret Sharing</strong> to split sensitive information (like wallet backups, passwords, or private keys) into multiple parts called "shares". You can store each share in a different location for security.</p>
+                
+                <h5 class="mt-4 mb-2">How it works:</h5>
+                <ul>
+                    <li><strong>Split:</strong> Your secret is compressed and divided into shares. For example, with a "2-of-3" setup, you create 3 shares and need any 2 to recover your secret.</li>
+                    <li><strong>Combine:</strong> Enter the required number of shares to reconstruct your original secret.</li>
+                    <li><strong>QR Codes:</strong> Generate QR codes for each share to print and store physically.</li>
+                </ul>
+
+                <h5 class="mt-4 mb-2">Common Uses:</h5>
+                <ul>
+                    <li>Backup Bitcoin wallet configurations (like multisig setups)</li>
+                    <li>Split master passwords across multiple locations</li>
+                    <li>Create family recovery systems where multiple people must collaborate</li>
+                </ul>
+
+                <div class="alert alert-info mt-4">
+                    <strong>💡 Pro Tip:</strong> Use "2-of-3" or "3-of-5" setups. This way, you can lose one share and still recover your secret, but no single person or location has access.
+                </div>
+
+                <div class="alert alert-warning mt-3">
+                    <strong>⚠️ Important:</strong> This app works entirely offline in your browser. Nothing is sent to any server. Always test recovery before relying on it for critical data.
+                </div>
+
+                <h5 class="mt-4 mb-2">Built With:</h5>
+                <p class="mb-1"><a href="https://github.com/grempe/secrets.js">secrets.js</a> - Shamir's Secret Sharing implementation</p>
+                <p class="mb-1"><a href="https://github.com/nodeca/pako">pako</a> - Data compression library</p>
+                <p class="mb-1"><a href="https://github.com/bitcoinjs/bech32">bitcoinjs/bech32</a> - Encoding with checksums</p>
+                <p class="mb-1"><a href="https://github.com/davidshimjs/qrcodejs">QRCode.js</a> - QR code generation</p>
+                <p class="mb-1"><a href="https://getbootstrap.com/">Bootstrap</a> - UI framework</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="lib/secrets/secrets.js"></script>
+    <script src="lib/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script src="lib/qrcode/qrcode.min.js"></script>
+    <script src="lib/pako/pako.js"></script>
+    <script src="lib/bech32/bech32-browser.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
