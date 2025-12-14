@@ -473,13 +473,22 @@ document.getElementById('combineButton').addEventListener('click', () => {
         const decoder = new TextDecoder();
         const recoveredSecret = decoder.decode(decompressed);
         
+        // Detect file type based on content
+        const fileTypeInfo = detectFileType(recoveredSecret);
+        
         combineResult.innerHTML = `
             <div class="result-box result-success">
+            <button class="btn btn-primary me-2" id="downloadSecretBtn">↓ ${fileTypeInfo.buttonLabel}</button>
                 <h5>Secret reconstructed:</h5>
                 <p class="mb-3" style="word-break: break-word;">${escapeHtml(recoveredSecret)}</p>
                 <button class="btn btn-success" id="copySecretBtn">Copy Secret</button>
             </div>
         `;
+        
+        // Add download button listener
+        document.getElementById('downloadSecretBtn').addEventListener('click', () => {
+            downloadTextFile(recoveredSecret, fileTypeInfo.filename);
+        });
         
         // Add copy secret button listener
         document.getElementById('copySecretBtn').addEventListener('click', () => {
@@ -494,6 +503,42 @@ document.getElementById('combineButton').addEventListener('click', () => {
 });
 
 // Utility functions
+function detectFileType(content) {
+    // Check for BSMS wallet configuration
+    if (/^BSMS\s+\d+\.\d+/i.test(content)) {
+        return {
+            extension: 'bsms',
+            filename: 'wallet-config.bsms',
+            buttonLabel: 'Download Wallet Configuration'
+        };
+    }
+    
+    // Add more file type detections here in the future
+    // Example patterns:
+    // - JSON: if (content.trim().startsWith('{') && content.trim().endsWith('}'))
+    // - Bitcoin private key: if (/^[5KL][1-9A-HJ-NP-Za-km-z]{50,51}$/.test(content.trim()))
+    // - etc.
+    
+    // Default to plain text
+    return {
+        extension: 'txt',
+        filename: 'secret.txt',
+        buttonLabel: 'Download as Text File'
+    };
+}
+
+function downloadTextFile(content, filename) {
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
 function copyToClipboard(text) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text);
