@@ -110,6 +110,68 @@ function bech32WordsToHex(words) {
     return uint8ArrayToHex(new Uint8Array(bytes));
 }
 
+// QR Code chunking utilities
+const MAX_QR_CHARS = 300; // Conservative limit for reliable scanning
+
+function encodeShareToQRChunks(share) {
+    if (share.length <= MAX_QR_CHARS) {
+        return [share]; // Single QR code
+    }
+    
+    const numChunks = Math.ceil(share.length / MAX_QR_CHARS);
+    const chunks = [];
+    
+    for (let i = 0; i < numChunks; i++) {
+        const start = i * MAX_QR_CHARS;
+        const end = Math.min(start + MAX_QR_CHARS, share.length);
+        const chunk = share.slice(start, end);
+        
+        // Format: PART{i+1}OF{numChunks}:{chunk}
+        chunks.push(`PART${i+1}OF${numChunks}:${chunk}`);
+    }
+    
+    return chunks;
+}
+
+function decodeQRChunks(scannedChunks) {
+    // Handle single non-chunked share (backward compatibility)
+    if (scannedChunks.length === 1 && !scannedChunks[0].match(/^PART\d+OF\d+:/)) {
+        return scannedChunks[0];
+    }
+    
+    // Sort by part number
+    const sorted = scannedChunks.sort((a, b) => {
+        const aMatch = a.match(/^PART(\d+)OF(\d+):/);
+        const bMatch = b.match(/^PART(\d+)OF(\d+):/);
+        if (!aMatch || !bMatch) {
+            throw new Error('Invalid chunk format');
+        }
+        return parseInt(aMatch[1]) - parseInt(bMatch[1]);
+    });
+    
+    // Validate complete set
+    const firstMatch = sorted[0].match(/^PART\d+OF(\d+):/);
+    if (!firstMatch) {
+        throw new Error('Invalid chunk format');
+    }
+    const totalParts = parseInt(firstMatch[1]);
+    
+    if (sorted.length !== totalParts) {
+        throw new Error(`Incomplete share: need ${totalParts} parts, have ${sorted.length}`);
+    }
+    
+    // Verify all part numbers are present
+    for (let i = 0; i < totalParts; i++) {
+        const match = sorted[i].match(/^PART(\d+)OF(\d+):/);
+        if (!match || parseInt(match[1]) !== i + 1) {
+            throw new Error(`Missing part ${i + 1} of ${totalParts}`);
+        }
+    }
+    
+    // Reconstruct share by removing prefixes and joining
+    return sorted.map(chunk => chunk.replace(/^PART\d+OF\d+:/, '')).join('');
+}
+
 // State
 let sharesNeeded = 2;
 let totalShares = 3;
@@ -199,9 +261,12 @@ document.getElementById('splitButton').addEventListener('click', () => {
             return metadata + bech32Encoded;
         });
         
-        // Display shares
+        // Display shares with QR chunking support
         let html = '<h5 class="mb-3">Generated Shares:</h5>';
         shares.forEach((share, index) => {
+            const chunks = encodeShareToQRChunks(share);
+            const isMultiQR = chunks.length > 1;
+            
             html += `
                 <div class="share-item mb-3">
                     <div class="input-group mb-2">
@@ -209,9 +274,10 @@ document.getElementById('splitButton').addEventListener('click', () => {
                         <input type="text" class="form-control" value="${share}" readonly>
                         <button class="btn btn-outline-secondary copy-share-btn" type="button" data-share="${share}">Copy</button>
                         <button class="btn btn-outline-info qr-toggle" type="button" data-index="${index}">
-                            <span class="toggle-icon">+</span> (QR)
+                            <span class="toggle-icon">+</span> ${isMultiQR ? `(${chunks.length} QRs)` : '(QR)'}
                         </button>
                     </div>
+                    ${isMultiQR ? `<div class="alert alert-warning py-1 px-2 mb-2" style="font-size: 0.875rem;">⚠️ Large share: requires ${chunks.length} QR codes</div>` : ''}
                     <div class="qr-container" id="qr-${index}"></div>
                 </div>
             `;
@@ -221,7 +287,7 @@ document.getElementById('splitButton').addEventListener('click', () => {
         html += '<button class="btn btn-outline-secondary mt-2" id="printShares">Print Shares</button>';
         sharesOutput.innerHTML = html;
         
-        // Add QR toggle event listeners
+        // Add QR toggle event listeners with chunking support
         document.querySelectorAll('.qr-toggle').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const index = e.currentTarget.getAttribute('data-index');
@@ -229,22 +295,53 @@ document.getElementById('splitButton').addEventListener('click', () => {
                 const toggleIcon = e.currentTarget.querySelector('.toggle-icon');
                 
                 if (qrContainer.classList.contains('active')) {
-                    // Hide QR code
+                    // Hide QR codes
                     qrContainer.classList.remove('active');
                     qrContainer.innerHTML = '';
                     toggleIcon.textContent = '+';
                 } else {
-                    // Show QR code
+                    // Show QR code(s)
                     qrContainer.classList.add('active');
-                    qrContainer.innerHTML = `<div id="qrcode-${index}"></div>`;
-                    new QRCode(document.getElementById(`qrcode-${index}`), {
-                        text: shares[index],
-                        width: 256,
-                        height: 256,
-                        colorDark: "#000000",
-                        colorLight: "#ffffff",
-                        correctLevel: QRCode.CorrectLevel.M
-                    });
+                    const chunks = encodeShareToQRChunks(shares[index]);
+                    
+                    if (chunks.length === 1) {
+                        // Single QR code
+                        qrContainer.innerHTML = `<div id="qrcode-${index}"></div>`;
+                        new QRCode(document.getElementById(`qrcode-${index}`), {
+                            text: chunks[0],
+                            width: 256,
+                            height: 256,
+                            colorDark: "#000000",
+                            colorLight: "#ffffff",
+                            correctLevel: QRCode.CorrectLevel.M
+                        });
+                    } else {
+                        // Multiple QR codes
+                        let qrHtml = '<div class="d-flex flex-wrap gap-3">';
+                        chunks.forEach((chunk, chunkIdx) => {
+                            qrHtml += `
+                                <div class="text-center">
+                                    <div class="mb-2 fw-bold">Part ${chunkIdx + 1} of ${chunks.length}</div>
+                                    <div id="qrcode-${index}-${chunkIdx}"></div>
+                                </div>
+                            `;
+                        });
+                        qrHtml += '</div>';
+                        qrContainer.innerHTML = qrHtml;
+                        
+                        // Generate each QR code
+                        chunks.forEach((chunk, chunkIdx) => {
+                            new QRCode(document.getElementById(`qrcode-${index}-${chunkIdx}`), {
+                                text: chunk,
+                                width: 200,
+                                height: 200,
+                                colorDark: "#000000",
+                                colorLight: "#ffffff",
+                                correctLevel: QRCode.CorrectLevel.M
+                            });
+                        });
+                    }
+                    
                     toggleIcon.textContent = '-';
                 }
             });
@@ -298,7 +395,24 @@ document.getElementById('splitButton').addEventListener('click', () => {
                             background: #f5f5f5;
                             border: 1px solid #ddd;
                         }
-                        /* Center and scale QR codes for print - using unique class */
+                        /* QR code container for multi-part shares */
+                        .print-qr-container {
+                            display: flex;
+                            flex-wrap: wrap;
+                            gap: 20px;
+                            justify-content: center;
+                            align-items: flex-start;
+                            margin-top: 20px;
+                        }
+                        .print-qr-part {
+                            text-align: center;
+                            flex: 0 0 auto;
+                        }
+                        .print-qr-part-label {
+                            font-weight: bold;
+                            margin-bottom: 10px;
+                            font-size: 14px;
+                        }
                         .print-qr-code {
                             display: flex;
                             align-items: center;
@@ -327,12 +441,29 @@ document.getElementById('splitButton').addEventListener('click', () => {
             `);
             
             shares.forEach((share, index) => {
+                const chunks = encodeShareToQRChunks(share);
+                const isMultiPart = chunks.length > 1;
+                
                 printWindow.document.write(`
                     <div class="share-section">
-                    <div class="share-title" style="padding-top:20px;">Share ${index + 1}:</div>
-                    <p>Generated on ${new Date().toLocaleString()}</p>
+                        <div class="share-title" style="padding-top:20px;">Share ${index + 1}${isMultiPart ? ` (${chunks.length} parts)` : ''}:</div>
+                        <p>Generated on ${new Date().toLocaleString()}</p>
                         <div class="share-text">${share}</div>
-                        <div class="print-qr-code" id="print-qr-${index}"></div>
+                        <div class="print-qr-container" id="print-qr-container-${index}">
+                `);
+                
+                // Add QR code placeholders for each chunk
+                chunks.forEach((chunk, chunkIdx) => {
+                    printWindow.document.write(`
+                        <div class="print-qr-part">
+                            ${isMultiPart ? `<div class="print-qr-part-label">Part ${chunkIdx + 1} of ${chunks.length}</div>` : ''}
+                            <div class="print-qr-code" id="print-qr-${index}-${chunkIdx}"></div>
+                        </div>
+                    `);
+                });
+                
+                printWindow.document.write(`
+                        </div>
                     </div>
                 `);
             });
@@ -346,13 +477,16 @@ document.getElementById('splitButton').addEventListener('click', () => {
             // Wait for document to load, then generate QR codes and print
             printWindow.onload = () => {
                 shares.forEach((share, index) => {
-                    new QRCode(printWindow.document.getElementById(`print-qr-${index}`), {
-                        text: share,
-                        width: 256,
-                        height: 256,
-                        colorDark: "#000000",
-                        colorLight: "#ffffff",
-                        correctLevel: QRCode.CorrectLevel.M
+                    const chunks = encodeShareToQRChunks(share);
+                    chunks.forEach((chunk, chunkIdx) => {
+                        new QRCode(printWindow.document.getElementById(`print-qr-${index}-${chunkIdx}`), {
+                            text: chunk,
+                            width: 256,
+                            height: 256,
+                            colorDark: "#000000",
+                            colorLight: "#ffffff",
+                            correctLevel: QRCode.CorrectLevel.M
+                        });
                     });
                 });
                 
@@ -379,8 +513,9 @@ document.getElementById('addShareButton').addEventListener('click', () => {
                 <label class="form-label">Share ${shareCount}:</label>
                 <div class="input-group">
                     <button class="btn btn-outline-secondary scan-qr-btn" type="button" title="Scan QR Code">📸</button>
-                    <input type="text" class="form-control share-input" placeholder="Paste share here...">
+                    <input type="text" class="form-control share-input" placeholder="Paste share here or scan QR code(s)...">
                 </div>
+                <small class="text-muted share-hint">Supports multi-part QR codes</small>
             </div>
             <button class="btn btn-outline-danger remove-share-btn" type="button" style="margin-top: 32px;">Remove</button>
         </div>
@@ -415,21 +550,45 @@ function updateShareLabels() {
 // Combine functionality
 document.getElementById('combineButton').addEventListener('click', () => {
     const shareInputs = document.querySelectorAll('.share-input');
-    const shares = [];
+    const rawShares = [];
     
     shareInputs.forEach(input => {
         const value = input.value.trim();
         if (value) {
-            shares.push(value);
+            rawShares.push(value);
         }
     });
     
-    if (shares.length < 2) {
+    if (rawShares.length < 2) {
         combineResult.innerHTML = '<div class="result-box result-error">Please enter at least 2 shares.</div>';
         return;
     }
     
     try {
+        // Process shares - handle both chunked (PART format) and non-chunked shares
+        // Note: User might manually paste chunks separated by newlines or spaces
+        const shares = rawShares.map((rawShare, idx) => {
+            // Check if input contains multiple chunks (user manually pasted all parts)
+            const lines = rawShare.split(/[\n\r]+/).map(l => l.trim()).filter(l => l);
+            
+            if (lines.length > 1 && lines.every(l => l.match(/^PART\d+OF\d+:/))) {
+                // Multiple chunks pasted - reassemble them
+                try {
+                    return decodeQRChunks(lines);
+                } catch (e) {
+                    throw new Error(`Share ${idx + 1}: ${e.message}`);
+                }
+            } else if (rawShare.match(/^PART\d+OF\d+:/)) {
+                // Single chunk - incomplete share
+                const match = rawShare.match(/^PART\d+OF(\d+):/);
+                const totalParts = match ? match[1] : '?';
+                throw new Error(`Share ${idx + 1} is incomplete (needs ${totalParts} parts total)`);
+            } else {
+                // Normal single-QR share
+                return rawShare;
+            }
+        });
+        
         // 1. Decode bech32 shares and reconstruct hex format
         const hexShares = shares.map((share, idx) => {
             try {
@@ -566,9 +725,11 @@ function escapeHtml(text) {
     return text.replace(/[&<>"']/g, m => map[m]);
 }
 
-// QR Scanner functionality
+// QR Scanner functionality with multi-part support
 let qrScanner = null;
 let currentScanInput = null;
+let scannedChunks = []; // Store chunks for current share
+let expectedChunkCount = 0; // Total chunks expected for current share
 
 function initQrScanner() {
     const video = document.getElementById('qr-video');
@@ -580,8 +741,7 @@ function initQrScanner() {
         result => {
             // On successful scan
             if (currentScanInput) {
-                currentScanInput.value = result.data;
-                stopScanner();
+                handleQRScan(result.data);
             }
         },
         {
@@ -625,10 +785,109 @@ function initQrScanner() {
     });
 }
 
+function handleQRScan(data) {
+    // Check if this is a chunked share
+    const chunkMatch = data.match(/^PART(\d+)OF(\d+):/);
+    
+    if (chunkMatch) {
+        // Multi-part share
+        const partNum = parseInt(chunkMatch[1]);
+        const totalParts = parseInt(chunkMatch[2]);
+        
+        // Initialize chunk tracking if this is the first chunk
+        if (scannedChunks.length === 0) {
+            expectedChunkCount = totalParts;
+            updateScannerFeedback(`Scanned part 1 of ${totalParts}. Scan ${totalParts - 1} more.`);
+        }
+        
+        // Validate this chunk belongs to the same share
+        if (totalParts !== expectedChunkCount) {
+            updateScannerFeedback(`Error: Expected ${expectedChunkCount} parts but this QR has ${totalParts} parts. Please scan the correct share.`, true);
+            return;
+        }
+        
+        // Check for duplicate chunks
+        const existingChunk = scannedChunks.find(c => c.match(/^PART(\d+)OF\d+:/)[1] === partNum.toString());
+        if (existingChunk) {
+            updateScannerFeedback(`Part ${partNum} already scanned. Scan remaining parts.`, false);
+            return;
+        }
+        
+        // Add chunk to collection
+        scannedChunks.push(data);
+        
+        // Update feedback
+        const remaining = totalParts - scannedChunks.length;
+        if (remaining > 0) {
+            updateScannerFeedback(`Scanned part ${partNum} of ${totalParts}. Scan ${remaining} more.`);
+        } else {
+            // All chunks collected, reassemble
+            try {
+                const fullShare = decodeQRChunks(scannedChunks);
+                currentScanInput.value = fullShare;
+                updateScannerFeedback(`✓ Complete! All ${totalParts} parts scanned.`, false);
+                
+                // Close scanner after short delay
+                setTimeout(() => {
+                    stopScanner();
+                }, 1500);
+            } catch (e) {
+                updateScannerFeedback(`Error reassembling share: ${e.message}`, true);
+            }
+        }
+    } else {
+        // Single QR code (no chunking)
+        currentScanInput.value = data;
+        updateScannerFeedback('✓ Share scanned successfully!', false);
+        setTimeout(() => {
+            stopScanner();
+        }, 1000);
+    }
+}
+
+function updateScannerFeedback(message, isError = false) {
+    const modal = document.getElementById('qr-scanner-modal');
+    let feedbackEl = modal.querySelector('.scanner-feedback');
+    
+    if (!feedbackEl) {
+        feedbackEl = document.createElement('div');
+        feedbackEl.className = 'scanner-feedback';
+        feedbackEl.style.cssText = 'color: white; text-align: center; margin-top: 1rem; padding: 0.5rem; font-weight: bold; border-radius: 4px;';
+        
+        const videoContainer = modal.querySelector('.qr-scanner-content');
+        const existingText = videoContainer.querySelector('p');
+        if (existingText) {
+            existingText.remove();
+        }
+        videoContainer.appendChild(feedbackEl);
+    }
+    
+    feedbackEl.textContent = message;
+    feedbackEl.style.backgroundColor = isError ? 'rgba(220, 53, 69, 0.8)' : 'rgba(25, 135, 84, 0.8)';
+}
+
 function startScanner(inputElement) {
     currentScanInput = inputElement;
+    scannedChunks = []; // Reset chunks
+    expectedChunkCount = 0; // Reset expected count
+    
     const modal = document.getElementById('qr-scanner-modal');
     modal.classList.add('active');
+    
+    // Reset feedback
+    const feedbackEl = modal.querySelector('.scanner-feedback');
+    if (feedbackEl) {
+        feedbackEl.remove();
+    }
+    
+    // Re-add instruction text
+    const videoContainer = modal.querySelector('.qr-scanner-content');
+    if (!videoContainer.querySelector('p')) {
+        const instruction = document.createElement('p');
+        instruction.style.cssText = 'color: white; text-align: center; margin-top: 1rem;';
+        instruction.textContent = 'Position QR code within the camera view';
+        videoContainer.appendChild(instruction);
+    }
     
     if (qrScanner) {
         qrScanner.start().catch(err => {
@@ -647,6 +906,8 @@ function stopScanner() {
     }
     
     currentScanInput = null;
+    scannedChunks = [];
+    expectedChunkCount = 0;
 }
 
 // Initialize QR scanner on page load
