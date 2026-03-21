@@ -513,6 +513,7 @@ document.getElementById('addShareButton').addEventListener('click', () => {
                 <label class="form-label">Share ${shareCount}:</label>
                 <div class="input-group">
                     <button class="btn btn-outline-secondary scan-qr-btn" type="button" title="Scan QR Code">📸</button>
+                    <button class="btn btn-outline-secondary upload-qr-btn" type="button" title="Upload QR Image">📁</button>
                     <input type="text" class="form-control share-input" placeholder="Paste share here or scan QR code(s)...">
                 </div>
                 <small class="text-muted share-hint">Supports multi-part QR codes</small>
@@ -726,61 +727,72 @@ function escapeHtml(text) {
 }
 
 // QR Scanner functionality with multi-part support
-let qrScanner = null;
+// Uses BarcodeDetector (native) with jsQR fallback — no Workers or WASM needed
+let scannerStream = null;
+let scannerAnimFrame = null;
+let qrDecoder = null;
 let currentScanInput = null;
-let scannedChunks = []; // Store chunks for current share
-let expectedChunkCount = 0; // Total chunks expected for current share
+let scannedChunks = [];
+let expectedChunkCount = 0;
+let scanCanvas = null;
+let scanCanvasCtx = null;
+let lastDecodeTime = 0;
 
 function initQrScanner() {
-    const video = document.getElementById('qr-video');
+    // Detect best available decoder: BarcodeDetector > jsQR
+    if ('BarcodeDetector' in window) {
+        qrDecoder = { type: 'barcode', instance: new BarcodeDetector({ formats: ['qr_code'] }) };
+    } else if (typeof jsQR !== 'undefined') {
+        qrDecoder = { type: 'jsqr' };
+    } else {
+        console.warn('No QR decoder available — camera scanning disabled');
+        document.querySelectorAll('.scan-qr-btn').forEach(btn => btn.disabled = true);
+        return;
+    }
+
+    // Offscreen canvas for frame capture (scaled down for performance)
+    scanCanvas = document.createElement('canvas');
+    scanCanvas.width = 400;
+    scanCanvas.height = 400;
+    scanCanvasCtx = scanCanvas.getContext('2d', { willReadFrequently: true });
+
     const modal = document.getElementById('qr-scanner-modal');
     const closeBtn = document.getElementById('qr-scanner-close');
-    
-    qrScanner = new QrScanner(
-        video,
-        result => {
-            // On successful scan
-            if (currentScanInput) {
-                handleQRScan(result.data);
-            }
-        },
-        {
-            returnDetailedScanResult: true,
-            highlightScanRegion: true,
-            highlightCodeOutline: true,
-            // Maximize scan area for dense QR codes
-            calculateScanRegion: (video) => {
-                // Use the largest possible square from the video frame
-                const width = video.videoWidth;
-                const height = video.videoHeight;
-                const size = Math.min(width, height);
-                
-                // Center the square region
-                const x = (width - size) / 2;
-                const y = (height - size) / 2;
-                
-                // Use higher resolution downscaling (800x800) for better detail capture
-                const downScaledSize = Math.min(800, size);
-                
-                return {
-                    x: x,
-                    y: y,
-                    width: size,
-                    height: size,
-                    downScaledWidth: downScaledSize,
-                    downScaledHeight: downScaledSize
-                };
-            },
-        }
-    );
-    
-    // Close button handler
+
     closeBtn.addEventListener('click', stopScanner);
-    
-    // Close on background click
     modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            stopScanner();
+        if (e.target === modal) stopScanner();
+    });
+}
+
+async function decodeFrame(video) {
+    if (!qrDecoder || !video.videoWidth) return null;
+
+    scanCanvasCtx.drawImage(video, 0, 0, scanCanvas.width, scanCanvas.height);
+
+    if (qrDecoder.type === 'barcode') {
+        try {
+            const results = await qrDecoder.instance.detect(scanCanvas);
+            if (results.length > 0) return results[0].rawValue;
+        } catch (e) { /* ignore decode errors */ }
+    } else {
+        const imageData = scanCanvasCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+        const result = jsQR(imageData.data, imageData.width, imageData.height);
+        if (result) return result.data;
+    }
+    return null;
+}
+
+function scanLoop(video) {
+    scannerAnimFrame = requestAnimationFrame(() => scanLoop(video));
+
+    const now = performance.now();
+    if (now - lastDecodeTime < 100) return; // Throttle to ~10 fps
+    lastDecodeTime = now;
+
+    decodeFrame(video).then(data => {
+        if (data && currentScanInput) {
+            handleQRScan(data);
         }
     });
 }
@@ -788,34 +800,37 @@ function initQrScanner() {
 function handleQRScan(data) {
     // Check if this is a chunked share
     const chunkMatch = data.match(/^PART(\d+)OF(\d+):/);
-    
+
     if (chunkMatch) {
         // Multi-part share
         const partNum = parseInt(chunkMatch[1]);
         const totalParts = parseInt(chunkMatch[2]);
-        
+
         // Initialize chunk tracking if this is the first chunk
         if (scannedChunks.length === 0) {
             expectedChunkCount = totalParts;
             updateScannerFeedback(`Scanned part 1 of ${totalParts}. Scan ${totalParts - 1} more.`);
         }
-        
+
         // Validate this chunk belongs to the same share
         if (totalParts !== expectedChunkCount) {
             updateScannerFeedback(`Error: Expected ${expectedChunkCount} parts but this QR has ${totalParts} parts. Please scan the correct share.`, true);
             return;
         }
-        
+
         // Check for duplicate chunks
-        const existingChunk = scannedChunks.find(c => c.match(/^PART(\d+)OF\d+:/)[1] === partNum.toString());
+        const existingChunk = scannedChunks.find(c => {
+            const match = c.match(/^PART(\d+)OF\d+:/);
+            return match && match[1] === partNum.toString();
+        });
         if (existingChunk) {
             updateScannerFeedback(`Part ${partNum} already scanned. Scan remaining parts.`, false);
             return;
         }
-        
+
         // Add chunk to collection
         scannedChunks.push(data);
-        
+
         // Update feedback
         const remaining = totalParts - scannedChunks.length;
         if (remaining > 0) {
@@ -826,8 +841,7 @@ function handleQRScan(data) {
                 const fullShare = decodeQRChunks(scannedChunks);
                 currentScanInput.value = fullShare;
                 updateScannerFeedback(`✓ Complete! All ${totalParts} parts scanned.`, false);
-                
-                // Close scanner after short delay
+
                 setTimeout(() => {
                     stopScanner();
                 }, 1500);
@@ -848,12 +862,12 @@ function handleQRScan(data) {
 function updateScannerFeedback(message, isError = false) {
     const modal = document.getElementById('qr-scanner-modal');
     let feedbackEl = modal.querySelector('.scanner-feedback');
-    
+
     if (!feedbackEl) {
         feedbackEl = document.createElement('div');
         feedbackEl.className = 'scanner-feedback';
         feedbackEl.style.cssText = 'color: white; text-align: center; margin-top: 1rem; padding: 0.5rem; font-weight: bold; border-radius: 4px;';
-        
+
         const videoContainer = modal.querySelector('.qr-scanner-content');
         const existingText = videoContainer.querySelector('p');
         if (existingText) {
@@ -861,25 +875,35 @@ function updateScannerFeedback(message, isError = false) {
         }
         videoContainer.appendChild(feedbackEl);
     }
-    
+
     feedbackEl.textContent = message;
     feedbackEl.style.backgroundColor = isError ? 'rgba(220, 53, 69, 0.8)' : 'rgba(25, 135, 84, 0.8)';
 }
 
-function startScanner(inputElement) {
+async function startScanner(inputElement) {
+    // Stop any existing scanner first
+    if (scannerAnimFrame) {
+        cancelAnimationFrame(scannerAnimFrame);
+        scannerAnimFrame = null;
+    }
+    if (scannerStream) {
+        scannerStream.getTracks().forEach(track => track.stop());
+        scannerStream = null;
+    }
+
     currentScanInput = inputElement;
-    scannedChunks = []; // Reset chunks
-    expectedChunkCount = 0; // Reset expected count
-    
+    scannedChunks = [];
+    expectedChunkCount = 0;
+
     const modal = document.getElementById('qr-scanner-modal');
     modal.classList.add('active');
-    
+
     // Reset feedback
     const feedbackEl = modal.querySelector('.scanner-feedback');
     if (feedbackEl) {
         feedbackEl.remove();
     }
-    
+
     // Re-add instruction text
     const videoContainer = modal.querySelector('.qr-scanner-content');
     if (!videoContainer.querySelector('p')) {
@@ -888,23 +912,43 @@ function startScanner(inputElement) {
         instruction.textContent = 'Position QR code within the camera view';
         videoContainer.appendChild(instruction);
     }
-    
-    if (qrScanner) {
-        qrScanner.start().catch(err => {
-            alert('Failed to start camera: ' + err.message);
-            stopScanner();
+
+    if (!qrDecoder) {
+        updateScannerFeedback('No QR decoder available. Try uploading a QR image instead.', true);
+        return;
+    }
+
+    try {
+        const video = document.getElementById('qr-video');
+        scannerStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment' }
         });
+        video.srcObject = scannerStream;
+        await video.play();
+        lastDecodeTime = 0;
+        scanLoop(video);
+    } catch (err) {
+        updateScannerFeedback('Failed to start camera: ' + err.message, true);
     }
 }
 
 function stopScanner() {
     const modal = document.getElementById('qr-scanner-modal');
     modal.classList.remove('active');
-    
-    if (qrScanner) {
-        qrScanner.stop();
+
+    if (scannerAnimFrame) {
+        cancelAnimationFrame(scannerAnimFrame);
+        scannerAnimFrame = null;
     }
-    
+
+    if (scannerStream) {
+        scannerStream.getTracks().forEach(track => track.stop());
+        scannerStream = null;
+    }
+
+    const video = document.getElementById('qr-video');
+    if (video) video.srcObject = null;
+
     currentScanInput = null;
     scannedChunks = [];
     expectedChunkCount = 0;
@@ -913,12 +957,138 @@ function stopScanner() {
 // Initialize QR scanner on page load
 initQrScanner();
 
-// Add scan button event listeners to existing inputs
+// QR Image Upload functionality
+let uploadTargetInput = null;
+let uploadChunks = [];
+let uploadExpectedChunks = 0;
+
+async function decodeQRFromImage(file) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            // Scale down large images for performance, but keep enough detail
+            const maxDim = 800;
+            const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+            canvas.width = img.width * scale;
+            canvas.height = img.height * scale;
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+            if (qrDecoder && qrDecoder.type === 'barcode') {
+                qrDecoder.instance.detect(canvas)
+                    .then(results => {
+                        if (results.length > 0) resolve(results[0].rawValue);
+                        else reject(new Error('No QR code found in image'));
+                    })
+                    .catch(reject);
+            } else if (qrDecoder && qrDecoder.type === 'jsqr') {
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const result = jsQR(imageData.data, imageData.width, imageData.height);
+                if (result) resolve(result.data);
+                else reject(new Error('No QR code found in image'));
+            } else {
+                reject(new Error('No QR decoder available'));
+            }
+            URL.revokeObjectURL(img.src);
+        };
+        img.onerror = () => reject(new Error('Failed to load image'));
+        img.src = URL.createObjectURL(file);
+    });
+}
+
+function handleUploadResult(data, inputElement) {
+    const chunkMatch = data.match(/^PART(\d+)OF(\d+):/);
+
+    if (chunkMatch) {
+        const partNum = parseInt(chunkMatch[1]);
+        const totalParts = parseInt(chunkMatch[2]);
+
+        if (uploadChunks.length === 0) {
+            uploadExpectedChunks = totalParts;
+        }
+
+        if (totalParts !== uploadExpectedChunks) {
+            alert(`Error: Expected ${uploadExpectedChunks} parts but this QR has ${totalParts} parts.`);
+            return;
+        }
+
+        const existingChunk = uploadChunks.find(c => {
+            const match = c.match(/^PART(\d+)OF\d+:/);
+            return match && match[1] === partNum.toString();
+        });
+        if (existingChunk) {
+            alert(`Part ${partNum} already uploaded.`);
+            return;
+        }
+
+        uploadChunks.push(data);
+        const remaining = totalParts - uploadChunks.length;
+
+        if (remaining > 0) {
+            // Prompt for next part
+            alert(`Uploaded part ${partNum} of ${totalParts}. Please upload ${remaining} more part(s).`);
+            document.getElementById('qr-file-input').click();
+        } else {
+            try {
+                const fullShare = decodeQRChunks(uploadChunks);
+                inputElement.value = fullShare;
+                uploadChunks = [];
+                uploadExpectedChunks = 0;
+            } catch (e) {
+                alert(`Error reassembling share: ${e.message}`);
+                uploadChunks = [];
+                uploadExpectedChunks = 0;
+            }
+        }
+    } else {
+        inputElement.value = data;
+        uploadChunks = [];
+        uploadExpectedChunks = 0;
+    }
+}
+
+function triggerUpload(inputElement) {
+    uploadTargetInput = inputElement;
+    uploadChunks = [];
+    uploadExpectedChunks = 0;
+    document.getElementById('qr-file-input').click();
+}
+
+// File input change handler
+document.getElementById('qr-file-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file || !uploadTargetInput) return;
+    // Reset input so the same file can be selected again (for multi-part)
+    e.target.value = '';
+
+    try {
+        const data = await decodeQRFromImage(file);
+        handleUploadResult(data, uploadTargetInput);
+    } catch (err) {
+        alert('Could not decode QR code: ' + err.message);
+    }
+});
+
+// "Upload Image Instead" button in scanner modal
+document.getElementById('scanner-upload-btn').addEventListener('click', () => {
+    const input = currentScanInput;
+    stopScanner();
+    if (input) triggerUpload(input);
+});
+
+// Add scan and upload button event listeners to existing inputs
 function attachScanListeners() {
     document.querySelectorAll('.scan-qr-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             const input = e.target.closest('.input-group').querySelector('.share-input');
             startScanner(input);
+        });
+    });
+    document.querySelectorAll('.upload-qr-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const input = e.target.closest('.input-group').querySelector('.share-input');
+            triggerUpload(input);
         });
     });
 }

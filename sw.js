@@ -1,4 +1,4 @@
-const CACHE_NAME = 'secret-sharing-v7';
+const CACHE_NAME = 'secret-sharing-v8';
 
 // Get the base path from the service worker location
 const getBasePath = () => {
@@ -18,8 +18,7 @@ const urlsToCache = [
   `${basePath}lib/qrcode/qrcode.min.js`,
   `${basePath}lib/pako/pako.js`,
   `${basePath}lib/bech32/bech32-browser.js`,
-  `${basePath}lib/qr-scanner/qr-scanner.umd.min.js`,
-  `${basePath}lib/qr-scanner/qr-scanner-worker.min.js`,
+  `${basePath}lib/jsqr/jsQR.js`,
   `${basePath}lib/bootstrap/css/bootstrap.min.css`,
   `${basePath}lib/bootstrap/js/bootstrap.bundle.min.js`
 ];

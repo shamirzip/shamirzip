@@ -103,6 +103,34 @@
             font-size: 2rem;
             cursor: pointer;
         }
+        .qr-video-wrapper {
+            position: relative;
+            overflow: hidden;
+            border-radius: 0.5rem;
+        }
+        .qr-video-wrapper video {
+            width: 100%;
+            display: block;
+            border-radius: 0.5rem;
+        }
+        .scan-region-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 60%;
+            height: 0;
+            padding-bottom: 60%;
+            transform: translate(-50%, -50%);
+            border: 3px solid rgba(13, 110, 253, 0.8);
+            border-radius: 12px;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.3);
+            animation: scan-pulse 2s ease-in-out infinite;
+            pointer-events: none;
+        }
+        @keyframes scan-pulse {
+            0%, 100% { border-color: rgba(13, 110, 253, 0.8); }
+            50% { border-color: rgba(13, 110, 253, 0.3); }
+        }
     </style>
 </head>
 <body data-bs-theme="dark">
@@ -161,6 +189,7 @@
                         <label class="form-label">Share 1:</label>
                         <div class="input-group">
                             <button class="btn btn-outline-secondary scan-qr-btn" type="button" title="Scan QR Code">📸</button>
+                            <button class="btn btn-outline-secondary upload-qr-btn" type="button" title="Upload QR Image">📁</button>
                             <input type="text" class="form-control share-input" placeholder="Paste share here...">
                         </div>
                     </div>
@@ -168,6 +197,7 @@
                         <label class="form-label">Share 2:</label>
                         <div class="input-group">
                             <button class="btn btn-outline-secondary scan-qr-btn" type="button" title="Scan QR Code">📸</button>
+                            <button class="btn btn-outline-secondary upload-qr-btn" type="button" title="Upload QR Image">📁</button>
                             <input type="text" class="form-control share-input" placeholder="Paste share here...">
                         </div>
                     </div>
@@ -214,7 +244,7 @@
                 <p class="mb-1"><a href="https://github.com/nodeca/pako">pako</a> - Data compression library</p>
                 <p class="mb-1"><a href="https://github.com/bitcoinjs/bech32">bitcoinjs/bech32</a> - Encoding with checksums</p>
                 <p class="mb-1"><a href="https://github.com/davidshimjs/qrcodejs">QRCode.js</a> - QR code generation</p>
-                <p class="mb-1"><a href="https://github.com/nimiq/qr-scanner">qr-scanner</a> - QR code scanning</p>
+                <p class="mb-1"><a href="https://github.com/cozmo/jsQR">jsQR</a> - QR code scanning</p>
                 <p class="mb-1"><a href="https://getbootstrap.com/">Bootstrap</a> - UI framework</p>
             </div>
         </div>
@@ -224,17 +254,24 @@
     <div id="qr-scanner-modal" class="qr-scanner-modal">
         <div class="qr-scanner-content">
             <button class="qr-scanner-close" id="qr-scanner-close">&times;</button>
-            <video id="qr-video" playsinline></video>
+            <div class="qr-video-wrapper">
+                <video id="qr-video" playsinline></video>
+                <div class="scan-region-overlay"></div>
+            </div>
             <p style="color: white; text-align: center; margin-top: 1rem;">Position QR code within the camera view</p>
+            <button class="btn btn-outline-light w-100 mt-2" id="scanner-upload-btn" type="button">📁 Upload QR Image Instead</button>
         </div>
     </div>
+
+    <!-- Hidden file input for QR image upload -->
+    <input type="file" id="qr-file-input" accept="image/*" style="display: none;">
 
     <script src="lib/secrets/secrets.js"></script>
     <script src="lib/bootstrap/js/bootstrap.bundle.min.js"></script>
     <script src="lib/qrcode/qrcode.min.js"></script>
     <script src="lib/pako/pako.js"></script>
     <script src="lib/bech32/bech32-browser.js"></script>
-    <script src="lib/qr-scanner/qr-scanner.umd.min.js"></script>
+    <script src="lib/jsqr/jsQR.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

@@ -162,10 +162,10 @@ QR code generation library.
 - **License**: MIT
 - **Usage**: Generate QR codes for shares
 
-### [qr-scanner](https://github.com/nimiq/qr-scanner)
-Lightweight QR code scanner for the browser.
-- **License**: MIT
-- **Usage**: Scan QR codes with device camera
+### [jsQR](https://github.com/cozmo/jsQR)
+Pure JavaScript QR code decoder (fallback when BarcodeDetector API is unavailable).
+- **License**: Apache-2.0
+- **Usage**: Decode QR codes from camera frames and uploaded images
 
 ## License
 
