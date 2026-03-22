@@ -169,7 +169,9 @@ Pure JavaScript QR code decoder (fallback when BarcodeDetector API is unavailabl
 
 ## License
 
-MIT License - See LICENSE file for details
+MIT License - See LICENSE file for details.
+
+Third-party dependency licenses (including Apache-2.0 for jsQR) are documented in [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
 
 ## Contributing
 
